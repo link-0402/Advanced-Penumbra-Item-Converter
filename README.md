@@ -1,5 +1,7 @@
 # Advanced Penumbra Item Converter
 
+Download the latest release here: https://github.com/link-0402/Advanced-Penumbra-Item-Converter/releases/tag/2.0
+
 A Python GUI tool for converting FFXIV Penumbra with advanced options from one item to another while preserving said options.
 
 ! Note that this tool is unable to read game data of any sort, so it will be unable to write metadata changes that were not explicitly set on the modded item beforehand.
