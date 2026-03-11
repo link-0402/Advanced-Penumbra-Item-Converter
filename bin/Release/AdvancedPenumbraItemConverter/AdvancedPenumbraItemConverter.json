@@ -1,0 +1,25 @@
+{
+  "Author": "You",
+  "Name": "Advanced Penumbra Item Converter",
+  "InternalName": "AdvancedPenumbraItemConverter",
+  "AssemblyVersion": "1.0.0.0",
+  "Description": "Convert Penumbra mod assets from one FFXIV item ID to another. Renames files, updates JSON metadata, and patches binary paths inside .mdl / .mtrl files — all without touching the game files.",
+  "ApplicableVersion": "any",
+  "RepoUrl": "https://github.com/example/AdvancedPenumbraItemConverter",
+  "Tags": [
+    "penumbra",
+    "modding",
+    "ffxiv",
+    "gear"
+  ],
+  "CategoryTags": [
+    "Modding"
+  ],
+  "DalamudApiLevel": 14,
+  "LoadRequiredState": 0,
+  "LoadSync": false,
+  "CanUnloadAsync": true,
+  "LoadPriority": 0,
+  "Punchline": "Retarget Penumbra mods to a different item ID in-game.",
+  "AcceptsFeedback": true
+}

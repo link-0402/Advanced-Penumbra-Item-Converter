@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "bfrls4DeOb4=",
+  "success": true,
+  "projectFilePath": "H:\\FFXIVmods\\Advanced Penumbra Item Converter\\AdvancedPenumbraItemConverter.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\leong\\.nuget\\packages\\dalamudpackager\\14.0.2\\dalamudpackager.14.0.2.nupkg.sha512",
+    "C:\\Users\\leong\\.nuget\\packages\\dotnet.reproduciblebuilds\\1.2.39\\dotnet.reproduciblebuilds.1.2.39.nupkg.sha512"
+  ],
+  "logs": []
+}
