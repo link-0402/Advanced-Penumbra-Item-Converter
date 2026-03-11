@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Package
+        run: Compress-Archive -Path "bin\x64\Release\AdvancedPenumbraItemConverter\*" -DestinationPath "latest.zip"
+
+      - name: Read version from built manifest
+        id: version
+        run: |
+          $version = (Get-Content "bin\x64\Release\AdvancedPenumbraItemConverter\AdvancedPenumbraItemConverter.json" | ConvertFrom-Json).AssemblyVersion
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Update repo.json version
+        run: |
+          $repo = Get-Content repo.json | ConvertFrom-Json
+          $repo[0].AssemblyVersion = "${{ steps.version.outputs.version }}"
+          $repo | ConvertTo-Json -Depth 10 | Set-Content repo.json
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: latest.zip
+
+      - name: Commit updated repo.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add repo.json
+          git diff --staged --quiet || git commit -m "Update repo.json to ${{ steps.version.outputs.version }}"
+          git push origin HEAD:main

@@ -3,7 +3,7 @@
 
   <PropertyGroup>
     <Version>1.0.0.0</Version>
-    <PackageProjectUrl>https://github.com/example/AdvancedPenumbraItemConverter</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/link-0402/AdvancedPenumbraItemConverter</PackageProjectUrl>
     <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
     <IsPackable>false</IsPackable>
     <Nullable>enable</Nullable>
