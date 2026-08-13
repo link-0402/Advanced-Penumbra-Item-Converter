@@ -318,8 +318,9 @@ public sealed class GameDataService
     /// Reads the vanilla Equipment Parameter (EQP) entry for the given equipment
     /// set ID and slot directly from the game binary.
     /// Returns null for accessory slots (they have no EQP) or on read failure.
-    /// Body and Head slots produce a ushort value (16-bit flags);
-    /// Hands, Legs and Feet produce a byte value.
+    ///
+    /// The returned value is the slot's bits shifted down to bit 0 — exactly the
+    /// form Penumbra stores in the "Entry" field of an EQP manipulation.
     /// </summary>
     public ulong? GetDefaultEqpEntry(ushort setId, EquipSlot slot)
     {
@@ -333,35 +334,52 @@ public sealed class GameDataService
             var bytes = file.Data;
             if (bytes.Length < 8) return null;
 
-            // 8-byte LE ulong header = number of set entries
-            var count = BitConverter.ToUInt64(bytes, 0);
-            if ((ulong)setId >= count) return null;
+            // The raw EQP file uses a block layout (cf. Penumbra ExpandedEqpGmpBase):
+            //   offset 0   : 64-bit control block — bit i set = block i is stored
+            //   offset 8   : the stored blocks in ascending order, each 160 entries × 8 bytes
+            // Collapsed blocks (bit clear) fall back to the game's default entry.
+            //   entry[setId] = stored[setId / 160 % …]  with the stored block index being
+            //   the number of set bits before block (setId / 160).
+            const int blockSize = 160;
+            const int entrySize = 8;
 
-            // Each entry is 8 bytes, starting at offset 8
-            int entryOffset = 8 + setId * 8;
-            if (entryOffset + 8 > bytes.Length) return null;
+            if (setId == 0) setId = 1;   // set id 0 aliases 1 in the game
 
-            // Read the full 8-byte entry as a LE ulong and return the slot-specific
-            // bits *in their correct bit positions*.  Penumbra's "Entry" JSON field is
-            // the full 64-bit ulong; when it applies the manipulation it masks out only
-            // the slot's region (e.g. bits 48-55 for Feet).  Returning just the raw byte
-            // value (e.g. 15) without shifting would place those bits at positions 0-3
-            // (Body slot), so Penumbra would see zeroes after masking for Feet.
-            //
-            // Byte layout (LE ulong):
-            //   bits  0-15 (bytes 0-1) = Body  flags  → mask 0x000000000000FFFF
-            //   bits 16-31 (bytes 2-3) = Head  flags  → mask 0x00000000FFFF0000
-            //   bits 32-39 (byte 4)    = Hands flags  → mask 0x000000FF00000000
-            //   bits 40-47 (byte 5)    = Legs  flags  → mask 0x0000FF0000000000
-            //   bits 48-55 (byte 6)    = Feet  flags  → mask 0x00FF000000000000
-            var fullEntry = BitConverter.ToUInt64(bytes, entryOffset);
+            int blockIdx = setId / blockSize;
+            if (blockIdx >= 64) return null;
+
+            var control = BitConverter.ToUInt64(bytes, 0);
+            ulong rawEntry;
+            if ((control & (1UL << blockIdx)) == 0)
+            {
+                // Collapsed block — the game uses the default entry for this set id.
+                rawEntry = 0x3fe00070603f00UL;   // Penumbra Eqp.DefaultEntry
+            }
+            else
+            {
+                var storedBefore = System.Numerics.BitOperations.PopCount(
+                    control & ((1UL << blockIdx) - 1));
+                var idx     = setId % blockSize;
+                var offset  = 8 + (storedBefore * blockSize + idx) * entrySize;
+                if (offset + entrySize > bytes.Length) return null;
+                rawEntry = BitConverter.ToUInt64(bytes, offset);
+            }
+
+            // Slot bit layout inside the 64-bit EQP entry (cf. Penumbra EqpEntry):
+            //   bits  0-15 (bytes 0-1) = Body  flags
+            //   bits 16-23 (byte  2)   = Legs  flags
+            //   bits 24-31 (byte  3)   = Hands flags
+            //   bits 32-39 (byte  4)   = Feet  flags
+            //   bits 40-63 (bytes 5-7) = Head  flags
+            // Penumbra's "Entry" JSON field holds the slot's bits shifted down to
+            // bit 0; Penumbra shifts them back into place when applying.
             return slot switch
             {
-                EquipSlot.Body  => fullEntry & 0x000000000000FFFFUL,
-                EquipSlot.Head  => fullEntry & 0x00000000FFFF0000UL,
-                EquipSlot.Hands => fullEntry & 0x000000FF00000000UL,
-                EquipSlot.Legs  => fullEntry & 0x0000FF0000000000UL,
-                EquipSlot.Feet  => fullEntry & 0x00FF000000000000UL,
+                EquipSlot.Body  => (rawEntry >> 0)  & 0x000000000000FFFFUL,
+                EquipSlot.Legs  => (rawEntry >> 16) & 0x00000000000000FFUL,
+                EquipSlot.Hands => (rawEntry >> 24) & 0x00000000000000FFUL,
+                EquipSlot.Feet  => (rawEntry >> 32) & 0x00000000000000FFUL,
+                EquipSlot.Head  => (rawEntry >> 40) & 0x0000000000FFFFFFUL,
                 _               => null,
             };
         }
@@ -387,17 +405,18 @@ public sealed class GameDataService
         ("Highlander", "Female", "0401"),
         ("Elezen",     "Male",   "0501"),
         ("Elezen",     "Female", "0601"),
-        ("Lalafell",   "Male",   "0701"),
-        ("Lalafell",   "Female", "0801"),
-        ("Miqote",     "Male",   "0901"),
-        ("Miqote",     "Female", "1001"),
-        ("Roegadyn",   "Male",   "1101"),
-        ("Roegadyn",   "Female", "1201"),
+        ("Miqote",   "Male",   "0701"),
+        ("Miqote",   "Female", "0801"),
+        ("Roegadyn",     "Male",   "0901"),
+        ("Roegadyn",     "Female", "1001"),
+        ("Lalafell",   "Male",   "1101"),
+        ("Lalafell",   "Female", "1201"),
         ("AuRa",       "Male",   "1301"),
         ("AuRa",       "Female", "1401"),
         ("Hrothgar",   "Male",   "1501"),
-        ("Viera",      "Female", "1701"),
-        ("Viera",      "Male",   "1801"),
+        ("Hrothgar",   "Female",   "1601"),
+        ("Viera",      "Male", "1701"),
+        ("Viera",      "Female",   "1801"),
     };
 
     // Bit-shift per equipment slot within the 2-byte EQDP entry ushort.
@@ -430,23 +449,37 @@ public sealed class GameDataService
         int shift  = EqdpSlotShift(slot);
         if (shift < 0) return result;
 
+        bool isAcc = SlotInfo.IsAccessory(slot);
+
         foreach (var (race, gender, code) in EqdpRaces)
         {
             try
             {
-                var path = $"chara/xls/equipmentdeformerparameter/c{code}.eqdp";
+                // Accessories have their own per-race EQDP files ("c0101a.eqdp").
+                var path = $"chara/xls/equipmentdeformerparameter/c{code}{(isAcc ? "a" : "")}.eqdp";
                 var file = _data.GetFile(path);
                 if (file == null) continue;
 
                 var bytes = file.Data;
-                if (bytes.Length < 8) continue;
+                if (bytes.Length < 6) continue;
 
-                // Same header as EQP: 8-byte LE ulong = number of entries.
-                // Each entry is a LE ushort (2 bytes), indexed by set ID.
-                var count = BitConverter.ToUInt64(bytes, 0);
-                if ((ulong)setId >= count) continue;
+                // EQDP file layout (cf. Penumbra ExpandedEqpFile):
+                //   [Identifier:ushort][BlockSize:ushort][BlockCount:ushort]
+                //   BlockCount × [block header:ushort]  — offset in ushorts from the
+                //   end of the header table to the block data, or 0xFFFF if collapsed.
+                //   Then the block data; entry[setId] = block[setId / BlockSize][setId % BlockSize].
+                int blockSize  = BitConverter.ToUInt16(bytes, 2);
+                int blockCount = BitConverter.ToUInt16(bytes, 4);
+                if (blockSize == 0 || blockCount == 0) continue;
 
-                int offset = 8 + setId * 2;
+                int blockIdx = setId / blockSize;
+                if (blockIdx >= blockCount) continue;
+
+                var blockHeader = BitConverter.ToUInt16(bytes, 6 + blockIdx * 2);
+                if (blockHeader == ushort.MaxValue) continue;   // collapsed → entry is 0
+
+                int dataBase = 6 + blockCount * 2 + blockHeader * 2;
+                int offset   = dataBase + (setId % blockSize) * 2;
                 if (offset + 2 > bytes.Length) continue;
 
                 var fullEntry = BitConverter.ToUInt16(bytes, offset);
@@ -490,11 +523,12 @@ public sealed class GameDataService
             if (file == null) return result;
 
             var data = file.Data;
-            // IMC file layout:
-            //   Offset 0 (uint16): packed field – bits 0-4 = numParts, bits 5-15 = subCount
-            //     subCount = number of additional variant rows; total rows = subCount + 1
-            //     numParts = parts per row (5 for equipment, 1 for accessories)
-            //   Offset 2 (uint16): type/flags (unused here)
+            // IMC file layout (cf. Penumbra ImcFile):
+            //   Offset 0 (uint16): variant count — the file holds rows 0..count,
+            //     where row N holds the entry for game variant N and row 0 is the
+            //     variant-0 fallback row.
+            //   Offset 2 (uint16): part mask — a bit per part; the number of set bits
+            //     is the number of parts in the file (5 for equipment and accessories).
             //   Offset 4+ : entries, 6 bytes each, row-major: row0part0, row0part1, …
             //   Each 6-byte entry:
             //     byte  0 : MaterialId
@@ -504,19 +538,15 @@ public sealed class GameDataService
             //     byte  5 : MaterialAnimationId
             if (data.Length < 4) return result;
 
-            ushort header    = BitConverter.ToUInt16(data, 0);
-            int    numParts  = header & 0x1F;         // lower 5 bits
-            int    subCount  = (header >> 5) & 0x7FF; // next 11 bits
-            int    totalRows = subCount + 1;
-
-            // Sanity-clamp: for equipment always ≥ 1 part (might be 0 for some exotic items)
-            if (numParts == 0)
-                numParts = isAcc ? 1 : 5;
+            int    count    = BitConverter.ToUInt16(data, 0);
+            ushort partMask = BitConverter.ToUInt16(data, 2);
+            int    numParts = System.Numerics.BitOperations.PopCount(partMask);
+            if (numParts == 0) return result;
 
             int partIdx = GetImcPartIndex(slot);
             if (partIdx < 0 || partIdx >= numParts) return result;
 
-            for (int row = 0; row < totalRows; row++)
+            for (int row = 1; row <= count; row++)
             {
                 int offset = 4 + (row * numParts + partIdx) * 6;
                 if (offset + 6 > data.Length) break;
@@ -530,7 +560,7 @@ public sealed class GameDataService
                 byte   animId      = data[offset + 5];
 
                 result.Add(new ImcVariantEntry(
-                    Variant             : row + 1,  // 1-based to match Penumbra
+                    Variant             : row,      // matches Penumbra's Variant field
                     MaterialId          : materialId,
                     DecalId             : decalId,
                     AttributeMask       : attrMask,
@@ -549,7 +579,8 @@ public sealed class GameDataService
     /// <summary>
     /// Returns the zero-based part index within an IMC row for the given equipment slot.
     /// Equipment rows have 5 parts (Head=0, Body=1, Hands=2, Legs=3, Feet=4).
-    /// Accessory rows have 1 part (index 0).
+    /// Accessory rows have the same 5-part layout (Ears=0, Neck=1, Wrists=2,
+    /// RFinger=3, LFinger=4) — cf. Penumbra's ImcFile.PartIndex.
     /// Returns -1 for unsupported slots.
     /// </summary>
     private static int GetImcPartIndex(EquipSlot slot) => slot switch
@@ -560,10 +591,10 @@ public sealed class GameDataService
         EquipSlot.Legs      => 3,
         EquipSlot.Feet      => 4,
         EquipSlot.Earring   => 0,
-        EquipSlot.Neck      => 0,
-        EquipSlot.Wrists    => 0,
-        EquipSlot.RingRight => 0,
-        EquipSlot.RingLeft  => 0,
+        EquipSlot.Neck      => 1,
+        EquipSlot.Wrists    => 2,
+        EquipSlot.RingRight => 3,
+        EquipSlot.RingLeft  => 4,
         _                   => -1,
     };
 

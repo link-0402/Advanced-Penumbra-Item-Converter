@@ -8,7 +8,7 @@
     "Punchline": "Retarget Penumbra mods to a different item ID in-game.",
     "RepoUrl": "https://github.com/link-0402/AdvancedPenumbraItemConverter",
     "ApplicableVersion": "any",
-    "DalamudApiLevel": 14,
+    "DalamudApiLevel": 15,
     "DownloadLinkInstall": "https://github.com/link-0402/AdvancedPenumbraItemConverter/releases/latest/download/latest.zip",
     "DownloadLinkUpdate": "https://github.com/link-0402/AdvancedPenumbraItemConverter/releases/latest/download/latest.zip",
     "DownloadLinkTesting": "https://github.com/link-0402/AdvancedPenumbraItemConverter/releases/latest/download/latest.zip",

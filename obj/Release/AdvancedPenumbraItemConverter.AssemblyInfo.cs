@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("AdvancedPenumbraItemConverter")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0.0+cf7119da7460121dd821226f515956800f42a83a")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0.0+2f5d0cdf790de03abface69e8b3bcb2031d4ae84")]
 [assembly: System.Reflection.AssemblyProductAttribute("AdvancedPenumbraItemConverter")]
 [assembly: System.Reflection.AssemblyTitleAttribute("AdvancedPenumbraItemConverter")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -1,8 +1,8 @@
 {
-  "version": 3,
+  "version": 4,
   "targets": {
-    "net10.0-windows7.0": {
-      "DalamudPackager/14.0.2": {
+    "net10.0-windows": {
+      "DalamudPackager/15.0.0": {
         "type": "package",
         "build": {
           "build/DalamudPackager.props": {},
@@ -26,17 +26,17 @@
     }
   },
   "libraries": {
-    "DalamudPackager/14.0.2": {
-      "sha512": "dQJeq+8eyHzra4Cg5eZ/3LAeS3/UpvvLriYJGSncMK9LqJ7Q4B6jwcOsxo3PfxVd15xj+IzVFxkPqIBmPQu8/w==",
+    "DalamudPackager/15.0.0": {
+      "sha512": "411vwC8/X8Z/sQ2TI6v3SvOn66xFPeOjFn3Zn+h0d3Ox2t1kFm66AhDvmx/qcMwVrR+Hidxj0dadpQ2dgyXMBQ==",
       "type": "package",
-      "path": "dalamudpackager/14.0.2",
+      "path": "dalamudpackager/15.0.0",
       "files": [
         ".nupkg.metadata",
         ".signature.p7s",
         "build/DalamudPackager.props",
         "build/DalamudPackager.targets",
         "buildMultiTargeting/DalamudPackager.props",
-        "dalamudpackager.14.0.2.nupkg.sha512",
+        "dalamudpackager.15.0.0.nupkg.sha512",
         "dalamudpackager.nuspec",
         "tasks/net48/DalamudPackager.dll",
         "tasks/net48/Newtonsoft.Json.dll",
@@ -66,8 +66,8 @@
     }
   },
   "projectFileDependencyGroups": {
-    "net10.0-windows7.0": [
-      "DalamudPackager >= 14.0.2",
+    "net10.0-windows": [
+      "DalamudPackager >= 15.0.0",
       "DotNet.ReproducibleBuilds >= 1.2.39"
     ]
   },
@@ -101,7 +101,8 @@
         "https://api.nuget.org/v3/index.json": {}
       },
       "frameworks": {
-        "net10.0-windows7.0": {
+        "net10.0-windows": {
+          "framework": "net10.0-windows7.0",
           "targetAlias": "net10.0-windows",
           "projectReferences": {}
         }
@@ -119,15 +120,16 @@
         "auditLevel": "low",
         "auditMode": "all"
       },
-      "SdkAnalysisLevel": "10.0.100"
+      "SdkAnalysisLevel": "10.0.300"
     },
     "frameworks": {
-      "net10.0-windows7.0": {
+      "net10.0-windows": {
+        "framework": "net10.0-windows7.0",
         "targetAlias": "net10.0-windows",
         "dependencies": {
           "DalamudPackager": {
             "target": "Package",
-            "version": "[14.0.2, )"
+            "version": "[15.0.0, )"
           },
           "DotNet.ReproducibleBuilds": {
             "suppressParent": "All",
@@ -151,7 +153,7 @@
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "c:\\program files\\dotnet\\sdk\\10.0.103/PortableRuntimeIdentifierGraph.json",
+        "runtimeIdentifierGraphPath": "c:\\program files\\dotnet\\sdk\\10.0.302/PortableRuntimeIdentifierGraph.json",
         "packagesToPrune": {
           "Microsoft.CSharp": "(,4.7.32767]",
           "Microsoft.VisualBasic": "(,10.4.32767]",

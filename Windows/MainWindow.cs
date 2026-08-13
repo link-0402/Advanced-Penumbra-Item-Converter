@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Numerics;
 using System.Text;
 using AdvancedPenumbraItemConverter.Models;
@@ -52,7 +55,7 @@ public sealed class MainWindow : Window, IDisposable
     };
 
     private static readonly string[] AccessorySlotLabels =
-        AccessorySlots.Select(s => SlotInfo.LabelMap[s]).ToArray();
+        AccessorySlots.Select(s => SlotInfo.DisplayLabelMap[s]).ToArray();
 
     // Penumbra mod browser
     private Dictionary<string, string>? _penumbraMods;   // dir → name
@@ -75,6 +78,22 @@ public sealed class MainWindow : Window, IDisposable
 
     // Post-conversion notification shown in the Setup tab
     private string? _postConversionNotice = null;
+
+    // Backup state
+    private string?          _lastBackupPath    = null;
+    private volatile bool    _backupInProgress  = false;
+    private volatile bool    _restoreInProgress = false;
+
+    // Conversion state
+    private volatile bool    _conversionInProgress    = false;
+    private volatile string? _bgPenumbraAddReloadDir  = null;  // set by bg thread; handled in Draw
+    private volatile string? _bgNewModDisplayName     = null;  // display name for AddMod notice
+    private volatile bool    _bgRefreshModList        = false;
+
+    // Thread-safe queue for results posted by background operations
+    private readonly ConcurrentQueue<string> _bgLogQueue = new();
+    private volatile string? _bgNotice = null;
+    private volatile bool    _bgRescan = false;
 
     // Output mode
     private bool   _createNewMod           = false;
@@ -125,6 +144,42 @@ public sealed class MainWindow : Window, IDisposable
     public override void Draw()
     {
         _penumbraAvailable = _plugin.PenumbraIpc.IsAvailable;
+
+        // Drain results posted by background operations
+        while (_bgLogQueue.TryDequeue(out var bgMsg))
+        {
+            if (bgMsg == "##penumbra-reload##")
+                ReloadInPenumbra();
+            else
+                AppendLog(bgMsg);
+        }
+        if (_bgNotice != null) { _postConversionNotice = _bgNotice; _bgNotice = null; }
+        if (_bgRescan)         { _bgRescan = false; MarkDirty(); ScanAndDetectItems(); }
+        if (_bgRefreshModList) { _bgRefreshModList = false; RefreshModList(); }
+        if (_bgPenumbraAddReloadDir != null)
+        {
+            var addDir      = _bgPenumbraAddReloadDir;
+            var displayName = _bgNewModDisplayName ?? addDir;
+            _bgPenumbraAddReloadDir = null;
+            _bgNewModDisplayName    = null;
+            bool added    = _plugin.PenumbraIpc.AddMod(addDir);
+            bool reloaded = added && _plugin.PenumbraIpc.ReloadMod(addDir);
+            if (reloaded)
+            {
+                AppendLog($"New mod registered and reloaded in Penumbra: {addDir}");
+                _postConversionNotice = $"New mod '{displayName}' is now visible in Penumbra.";
+            }
+            else if (added)
+            {
+                AppendLog($"New mod registered in Penumbra: {addDir} (reload may be needed).");
+                _postConversionNotice = $"New mod '{displayName}' added to Penumbra. Reload it if it appears empty.";
+            }
+            else
+            {
+                AppendLog($"[WARNING] Could not register '{addDir}' with Penumbra automatically. Add it manually via Rediscover Mods.");
+                _postConversionNotice = $"New mod '{displayName}' created. Trigger 'Rediscover Mods' in Penumbra to see it.";
+            }
+        }
 
         // Status bar
         DrawStatusBar();
@@ -295,7 +350,7 @@ public sealed class MainWindow : Window, IDisposable
                 for (int i = 0; i < _detectedItems.Count; i++)
                 {
                     var di  = _detectedItems[i];
-                    var lbl = $"[{SlotInfo.LabelMap[di.Slot]}]  {di.ItemName}  (ID: {di.ModelIdDisplay})";
+                    var lbl = $"[{SlotInfo.DisplayLabelMap[di.Slot]}]  {di.ItemName}  (ID: {di.ModelIdDisplay})";
                     bool sel = (i == _sourceItemIdx);
                     if (ImGui.Selectable(lbl, sel))
                     {
@@ -360,7 +415,7 @@ public sealed class MainWindow : Window, IDisposable
             // Filter bar
             ImGui.SetNextItemWidth(-1);
             if (ImGui.InputTextWithHint("##TargetSearch",
-                    $"Filter {SlotInfo.LabelMap[effectiveSlot]} items\u2026",
+                    $"Filter {SlotInfo.DisplayLabelMap[effectiveSlot]} items\u2026",
                     ref _targetSearch, 256))
             {
                 ApplyTargetFilter();
@@ -443,19 +498,72 @@ public sealed class MainWindow : Window, IDisposable
         // ── Action buttons ────────────────────────────────────────────────
         float btnW = 140;
 
-        if (_previewDirty) ImGui.PushStyleColor(ImGuiCol.Button, ColAccent);
+        bool anyOpRunning = _conversionInProgress || _backupInProgress || _restoreInProgress;
+
+        bool showPreviewHighlight = _previewDirty && !anyOpRunning;
+        if (showPreviewHighlight) ImGui.PushStyleColor(ImGuiCol.Button, ColAccent);
+        if (anyOpRunning) ImGui.BeginDisabled();
         if (ImGui.Button(_previewDirty ? "Preview Changes *" : "Preview Changes", new Vector2(btnW, 0)))
             RunPreview();
-        if (_previewDirty) ImGui.PopStyleColor();
+        if (anyOpRunning) ImGui.EndDisabled();
+        if (showPreviewHighlight) ImGui.PopStyleColor();
 
         ImGui.SameLine();
 
-        bool canApply = _task.IsPlanned && !_task.IsApplied;
+        bool canApply = _task.IsPlanned && !_task.IsApplied && !anyOpRunning;
         if (!canApply) ImGui.BeginDisabled();
-        string applyLabel = _createNewMod ? "Create New Mod" : "Apply Selected";
+        string applyLabel = _conversionInProgress ? "Converting\u2026" : (_createNewMod ? "Create New Mod" : "Apply Selected");
         if (ImGui.Button(applyLabel, new Vector2(btnW, 0)))
             RunApply();
         if (!canApply) ImGui.EndDisabled();
+
+        // ── Backup / Restore ──────────────────────────────────────────────
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        bool hasModDir   = !string.IsNullOrEmpty(_modDirInput) && Directory.Exists(_modDirInput);
+        bool opRunning   = _backupInProgress || _restoreInProgress || _conversionInProgress;
+        var  backupPath  = GetCurrentBackupPath();
+        bool backupExists = backupPath != null && File.Exists(backupPath);
+        bool ctrlShift   = ImGui.IsKeyDown(ImGuiKey.ModCtrl) && ImGui.IsKeyDown(ImGuiKey.ModShift);
+
+        bool canBackup  = hasModDir && !opRunning;
+        bool canRestore = hasModDir && backupExists && ctrlShift && !opRunning;
+
+        if (!canBackup) ImGui.BeginDisabled();
+        string backupLabel = _backupInProgress ? "Backing up…" : "Backup Mod";
+        if (ImGui.Button(backupLabel, new Vector2(btnW, 0)))
+            RunBackupMod();
+        if (ImGui.IsItemHovered(canBackup ? ImGuiHoveredFlags.None : ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip(_backupInProgress ? "Backup in progress…" : "Save a .pmp backup of the selected mod folder");
+        if (!canBackup) ImGui.EndDisabled();
+
+        ImGui.SameLine();
+
+        if (!canRestore) ImGui.BeginDisabled();
+        string restoreLabel = _restoreInProgress ? "Restoring…" : "Restore Backup";
+        if (ImGui.Button(restoreLabel, new Vector2(btnW, 0)))
+            RunRestoreBackup();
+        if (ImGui.IsItemHovered(canRestore ? ImGuiHoveredFlags.None : ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip(_restoreInProgress ? "Restore in progress…" :
+                             backupExists
+                                 ? "Hold Ctrl+Shift then click to restore the backup (overwrites the current mod)"
+                                 : "No backup found — create one first");
+        if (!canRestore) ImGui.EndDisabled();
+
+        if (!opRunning)
+        {
+            if (backupExists && hasModDir && !ctrlShift)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(ColMuted, "(Hold Ctrl+Shift to restore)");
+            }
+            else if (!backupExists && hasModDir)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(ColMuted, "(no backup)");
+            }
+        }
 
         ImGui.PopItemWidth();
 
@@ -722,7 +830,7 @@ public sealed class MainWindow : Window, IDisposable
                       $"{_task.PlannedJsonChanges.Sum(j => j.Changes.Count)} JSON changes, " +
                       $"{_task.PlannedBinaryPatches.Sum(b => b.Patches.Count)} binary patches.");
             var slotNote = _task.TargetSlot.HasValue
-                ? $" [{SlotInfo.LabelMap[src.Slot]} \u2192 {SlotInfo.LabelMap[_task.TargetSlot.Value]}]"
+                ? $" [{SlotInfo.DisplayLabelMap[src.Slot]} \u2192 {SlotInfo.DisplayLabelMap[_task.TargetSlot.Value]}]"
                 : string.Empty;
             AppendLog($"   {src.ItemName} (ID {src.ModelIdDisplay})  \u2192  {tgt.Name} (ID {tgt.ModelIdDisplay}){slotNote}");
         }
@@ -734,50 +842,56 @@ public sealed class MainWindow : Window, IDisposable
 
     private void RunApply()
     {
-        if (_createNewMod)
-        {
-            RunApplyNewMod();
-            return;
-        }
+        if (_conversionInProgress) return;
+        if (_createNewMod) { RunApplyNewMod(); return; }
 
-        _lastApplyLogOffset = _logBuffer.Length;
+        _lastApplyLogOffset   = _logBuffer.Length;
         _postConversionNotice = null;
-        _plugin.Converter.ApplyConversion(_task, AppendLog);
-        if (!_task.IsApplied) return;
+        _conversionInProgress = true;
 
-        // ── Post-conversion verification ──────────────────────────────────
-        AppendLog("Scanning for leftover old-item references...");
-        var leftovers = _plugin.Converter.VerifyConversion(_task);
-        if (leftovers.Count == 0)
+        var capturedTask = _task;
+        var isPenumbra   = _penumbraAvailable;
+        Task.Run(() =>
         {
-            AppendLog("Verification passed — no leftover references found.");
-        }
-        else
-        {
-            AppendLog($"[WARNING]  {leftovers.Count} leftover reference(s) found after conversion:");
-            foreach (var hit in leftovers)
+            try
             {
-                AppendLog($"  [{hit.HitType.ToUpper()}] {hit.Detail}");
-            }
-            AppendLog("These may be intentional (shared textures, unrelated groups) or missed changes.");
-        }
+                _plugin.Converter.ApplyConversion(capturedTask, msg => _bgLogQueue.Enqueue(msg));
+                if (!capturedTask.IsApplied) return;
 
-        if (_penumbraAvailable)
-        {
-            ReloadInPenumbra();
-            _postConversionNotice = "Conversion applied and mod reloaded in Penumbra.";
-        }
-        else
-        {
-            _postConversionNotice = "Conversion applied successfully.";
-        }
+                _bgLogQueue.Enqueue("Scanning for leftover old-item references...");
+                var leftovers = _plugin.Converter.VerifyConversion(capturedTask);
+                if (leftovers.Count == 0)
+                {
+                    _bgLogQueue.Enqueue("Verification passed — no leftover references found.");
+                }
+                else
+                {
+                    _bgLogQueue.Enqueue($"[WARNING]  {leftovers.Count} leftover reference(s) found after conversion:");
+                    foreach (var hit in leftovers)
+                        _bgLogQueue.Enqueue($"  [{hit.HitType.ToUpper()}] {hit.Detail}");
+                    _bgLogQueue.Enqueue("These may be intentional (shared textures, unrelated groups) or missed changes.");
+                }
+
+                if (isPenumbra)
+                {
+                    _bgNotice = "Conversion applied and mod reloaded in Penumbra.";
+                    _bgLogQueue.Enqueue("##penumbra-reload##");
+                }
+                else
+                {
+                    _bgNotice = "Conversion applied successfully.";
+                }
+            }
+            finally
+            {
+                _conversionInProgress = false;
+            }
+        });
     }
 
     private void RunApplyNewMod()
     {
-        _lastApplyLogOffset   = _logBuffer.Length;
-        _postConversionNotice = null;
-
+        // Validate synchronously before spawning the task
         if (string.IsNullOrWhiteSpace(_newModName))
         {
             _task.ErrorMessage = "Enter a name for the new mod before creating it.";
@@ -801,69 +915,157 @@ public sealed class MainWindow : Window, IDisposable
             return;
         }
 
-        var resultDir = _plugin.Converter.CreateNewModFromAssetChain(_task, newModDir, _newModName, AppendLog);
-        if (resultDir == null) return;
+        _lastApplyLogOffset   = _logBuffer.Length;
+        _postConversionNotice = null;
+        _conversionInProgress = true;
 
-        // ── Post-creation verification ────────────────────────────────────
-        AppendLog("Scanning new mod for leftover old-item references...");
-        var verifyTask = new ConversionTask
+        var capturedTask    = _task;
+        var capturedModDir  = newModDir;
+        var capturedModName = _newModName;
+        var isPenumbra      = _penumbraAvailable;
+        Task.Run(() =>
         {
-            ModDirectory = resultDir,
-            Slot         = _task.Slot,
-            OldIdPadded  = _task.OldIdPadded,
-            NewIdPadded  = _task.NewIdPadded,
-            TargetSlot   = _task.TargetSlot,
-        };
-        var leftovers = _plugin.Converter.VerifyConversion(verifyTask);
-        if (leftovers.Count == 0)
-        {
-            AppendLog("Verification passed — no leftover references found.");
-        }
-        else
-        {
-            AppendLog($"[WARNING]  {leftovers.Count} leftover reference(s) found:");
-            foreach (var hit in leftovers)
-                AppendLog($"  [{hit.HitType.ToUpper()}] {hit.Detail}");
-            AppendLog("These may be intentional (shared textures, unrelated groups) or missed changes.");
-        }
-
-        // ── Register and reload in Penumbra ──────────────────────────────
-        if (_penumbraAvailable)
-        {
-            var dirName = Path.GetFileName(resultDir);
-
-            // AddMod registers the folder in Penumbra's mod list
-            // ReloadMod then forces a full re-read of files from disk so metadata/options are populated immediately.
-            bool added   = _plugin.PenumbraIpc.AddMod(dirName);
-            bool reloaded = added && _plugin.PenumbraIpc.ReloadMod(dirName);
-
-            if (reloaded)
+            try
             {
-                AppendLog($"New mod registered and reloaded in Penumbra: {dirName}");
-                _postConversionNotice = $"New mod '{_newModName}' is now visible in Penumbra.";
-            }
-            else if (added)
-            {
-                AppendLog($"New mod registered in Penumbra: {dirName} (reload may be needed).");
-                _postConversionNotice = $"New mod '{_newModName}' added to Penumbra. Reload it if it appears empty.";
-            }
-            else
-            {
-                AppendLog($"[WARNING] Could not register '{dirName}' with Penumbra automatically. Add it manually via Rediscover Mods.");
-                _postConversionNotice = $"New mod '{_newModName}' created. Trigger 'Rediscover Mods' in Penumbra to see it.";
-            }
+                var resultDir = _plugin.Converter.CreateNewModFromAssetChain(
+                    capturedTask, capturedModDir, capturedModName,
+                    msg => _bgLogQueue.Enqueue(msg));
+                if (resultDir == null) return;
 
-            // Refresh the in-plugin mod list so the new entry shows up in the picker.
-            RefreshModList();
-        }
-        else
+                // ── Post-creation verification ────────────────────────────
+                _bgLogQueue.Enqueue("Scanning new mod for leftover old-item references...");
+                var verifyTask = new ConversionTask
+                {
+                    ModDirectory = resultDir,
+                    Slot         = capturedTask.Slot,
+                    OldIdPadded  = capturedTask.OldIdPadded,
+                    NewIdPadded  = capturedTask.NewIdPadded,
+                    TargetSlot   = capturedTask.TargetSlot,
+                };
+                var leftovers = _plugin.Converter.VerifyConversion(verifyTask);
+                if (leftovers.Count == 0)
+                {
+                    _bgLogQueue.Enqueue("Verification passed — no leftover references found.");
+                }
+                else
+                {
+                    _bgLogQueue.Enqueue($"[WARNING]  {leftovers.Count} leftover reference(s) found:");
+                    foreach (var hit in leftovers)
+                        _bgLogQueue.Enqueue($"  [{hit.HitType.ToUpper()}] {hit.Detail}");
+                    _bgLogQueue.Enqueue("These may be intentional (shared textures, unrelated groups) or missed changes.");
+                }
+
+                // ── Register in Penumbra (handled in Draw on game thread) ─
+                if (isPenumbra)
+                {
+                    _bgNewModDisplayName    = capturedModName;
+                    _bgPenumbraAddReloadDir = Path.GetFileName(resultDir);
+                    _bgRefreshModList       = true;
+                }
+                else
+                {
+                    _bgNotice = $"New mod '{capturedModName}' created at: {resultDir}";
+                }
+
+                // Persist the chosen name
+                _plugin.Configuration.LastNewModName = capturedModName;
+                _plugin.Configuration.Save();
+            }
+            finally
+            {
+                _conversionInProgress = false;
+            }
+        });
+    }
+
+    private void RunBackupMod()
+    {
+        if (_backupInProgress || _restoreInProgress) return;
+
+        var modDir     = _modDirInput.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var backupPath = GetCurrentBackupPath();
+        if (!Directory.Exists(modDir))  { AppendLog("[ERROR] Mod directory not found.");          return; }
+        if (backupPath == null)         { AppendLog("[ERROR] Could not determine backup path.");   return; }
+
+        _backupInProgress = true;
+        AppendLog($"Backup started: {Path.GetFileName(backupPath)}…");
+
+        var capturedMod  = modDir;
+        var capturedZip  = backupPath;
+        Task.Run(() =>
         {
-            _postConversionNotice = $"New mod '{_newModName}' created at: {resultDir}";
+            try
+            {
+                if (File.Exists(capturedZip)) File.Delete(capturedZip);
+                ZipFile.CreateFromDirectory(capturedMod, capturedZip, CompressionLevel.Optimal, includeBaseDirectory: false);
+                _lastBackupPath = capturedZip;
+                _bgLogQueue.Enqueue($"Backup created: {capturedZip}");
+                _bgNotice = $"Backup saved: {Path.GetFileName(capturedZip)}";
+            }
+            catch (Exception ex)
+            {
+                _bgLogQueue.Enqueue($"[ERROR] Backup failed: {ex.Message}");
+            }
+            finally
+            {
+                _backupInProgress = false;
+            }
+        });
+    }
+
+    private void RunRestoreBackup()
+    {
+        if (_backupInProgress || _restoreInProgress) return;
+
+        var modDir     = _modDirInput.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var backupPath = GetCurrentBackupPath();
+
+        if (backupPath == null || !File.Exists(backupPath))
+        {
+            AppendLog("[ERROR] No backup file found to restore.");
+            return;
         }
 
-        // Persist the chosen name.
-        _plugin.Configuration.LastNewModName = _newModName;
-        _plugin.Configuration.Save();
+        _restoreInProgress = true;
+        AppendLog($"Restore started from: {Path.GetFileName(backupPath)}…");
+
+        var capturedMod  = modDir;
+        var capturedZip  = backupPath;
+        var isPenumbra   = _penumbraAvailable;
+        Task.Run(() =>
+        {
+            try
+            {
+                if (Directory.Exists(capturedMod))
+                    Directory.Delete(capturedMod, recursive: true);
+
+                ZipFile.ExtractToDirectory(capturedZip, capturedMod);
+                _bgLogQueue.Enqueue($"Backup restored from: {capturedZip}");
+                _bgNotice = "Backup restored successfully.";
+                _bgRescan = true;
+
+                // ReloadInPenumbra touches UI state — post a flag instead and handle in Draw
+                if (isPenumbra) _bgLogQueue.Enqueue("##penumbra-reload##");
+            }
+            catch (Exception ex)
+            {
+                _bgLogQueue.Enqueue($"[ERROR] Restore failed: {ex.Message}");
+            }
+            finally
+            {
+                _restoreInProgress = false;
+            }
+        });
+    }
+
+    private string? GetCurrentBackupPath()
+    {
+        if (string.IsNullOrEmpty(_modDirInput)) return null;
+        var modDir     = _modDirInput.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var parent     = Path.GetDirectoryName(modDir);
+        var folderName = Path.GetFileName(modDir);
+        if (string.IsNullOrEmpty(parent) || string.IsNullOrEmpty(folderName)) return null;
+        return Path.Combine(parent, folderName + ".pmp");
     }
 
     private void ReloadInPenumbra()
@@ -1069,7 +1271,7 @@ public sealed class MainWindow : Window, IDisposable
                                                           : _detectedItems[_sourceItemIdx].Slot)
             : (EquipSlot?)null;
 
-        var slotLabel = effectiveSlot.HasValue ? SlotInfo.LabelMap[effectiveSlot.Value] : string.Empty;
+        var slotLabel = effectiveSlot.HasValue ? SlotInfo.DisplayLabelMap[effectiveSlot.Value] : string.Empty;
         var baseName  = GetModDisplayName();
 
         _newModName          = string.IsNullOrEmpty(slotLabel) ? baseName : $"{baseName} ({slotLabel})";

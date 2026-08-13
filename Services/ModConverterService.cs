@@ -224,6 +224,9 @@ public sealed class ModConverterService
             // If the mod carries no Eqp manipulation for the source item, the game
             // was using the vanilla EQP. After conversion the new item may have
             // different vanilla EQP, so we inject the old item's values explicitly.
+            // The entry is added to default_mod.json's always-on Manipulations array —
+            // attaching it to option-group arrays would make the new EQP behaviour
+            // depend on which options the user enables.
             if (_gameData != null && !SlotInfo.IsAccessory(task.Slot))
             {
                 var slotLabel9 = SlotInfo.LabelMap[task.Slot];
@@ -233,45 +236,25 @@ public sealed class ModConverterService
                 if (!HasEqpManipulation(jsonFileCache, oldInt9, slotLabel9))
                 {
                     var eqpVal = _gameData.GetDefaultEqpEntry((ushort)oldInt9, task.Slot);
-                    if (eqpVal.HasValue)
+                    if (eqpVal.HasValue && FindDefaultModJson(jsonFileCache) is { } defaultJson9)
                     {
                         // Sentinel stored in OldValue: "<slotLabel>|<newSetId>" (used to
                         // skip the insert if the entry already exists during apply).
                         var sentinel = $"{slotLabel9}|{newInt9}";
-                        var injJson  = $"{{\"Type\":\"Eqp\",\"Manipulation\":{{\"Entry\":{eqpVal.Value},\"SetId\":\"{newInt9}\",\"Slot\":\"{slotLabel9}\"}}}}"; 
+                        var injJson  = $"{{\"Type\":\"Eqp\",\"Manipulation\":{{\"Entry\":{eqpVal.Value},\"SetId\":{newInt9},\"Slot\":\"{slotLabel9}\"}}}}";
 
-                        var oldTokLow = oldToken.ToLower();
-                        var oldAltLow = oldAlt.ToLower();
-
-                        foreach (var (jsonFile9, node9) in jsonFileCache)
+                        var planned9 = GetOrCreatePlannedJsonChange(task, defaultJson9.path);
+                        planned9.Changes.Add(new JsonFieldChange
                         {
-                            var manipPaths = new List<string>();
-                            FindManipulationsForItem(node9, "<root>", oldTokLow, oldAltLow, manipPaths);
-                            if (manipPaths.Count == 0) continue;
+                            JsonPath   = "<root>.Manipulations",
+                            OldValue   = sentinel,
+                            NewValue   = injJson,
+                            ChangeType = "eqp_insert",
+                            Selected   = true,
+                        });
 
-                            // Reuse or create a PlannedJsonChange for this file
-                            var planned9 = task.PlannedJsonChanges
-                                .FirstOrDefault(j => string.Equals(
-                                    j.FilePath, jsonFile9, StringComparison.OrdinalIgnoreCase));
-                            if (planned9 == null)
-                            {
-                                planned9 = new PlannedJsonChange { FilePath = jsonFile9, Selected = true };
-                                task.PlannedJsonChanges.Add(planned9);
-                            }
-
-                            foreach (var mp in manipPaths)
-                                planned9.Changes.Add(new JsonFieldChange
-                                {
-                                    JsonPath   = mp,
-                                    OldValue   = sentinel,
-                                    NewValue   = injJson,
-                                    ChangeType = "eqp_insert",
-                                    Selected   = true,
-                                });
-
-                            _log.Debug("[APIC] EQP injection planned: Entry={0} SetId={1} Slot={2} in {3}",
-                                       eqpVal.Value, newInt9, slotLabel9, Path.GetFileName(jsonFile9));
-                        }
+                        _log.Debug("[APIC] EQP injection planned: Entry={0} SetId={1} Slot={2} in {3}",
+                                   eqpVal.Value, newInt9, slotLabel9, Path.GetFileName(defaultJson9.path));
                     }
                 }
             }
@@ -282,6 +265,7 @@ public sealed class ModConverterService
             // explicit Eqdp manipulation for the source item, the game was using the
             // vanilla EQDP. After conversion the new item may have different vanilla EQDP,
             // so we inject the source item's per-race values explicitly for the new item.
+            // Entries go into default_mod.json's always-on Manipulations array.
             if (_gameData != null)
             {
                 var slotLabel10   = SlotInfo.LabelMap[task.Slot];
@@ -293,46 +277,104 @@ public sealed class ModConverterService
                 if (!HasEqdpManipulation(jsonFileCache, oldInt10, slotLabel10))
                 {
                     var eqdpEntries = _gameData.GetDefaultEqdpEntries((ushort)oldInt10, task.Slot);
-                    if (eqdpEntries.Count > 0)
+                    if (eqdpEntries.Count > 0 && FindDefaultModJson(jsonFileCache) is { } defaultJson10)
                     {
-                        var oldTokLow10 = oldToken.ToLower();
-                        var oldAltLow10 = oldAlt.ToLower();
+                        var planned10 = GetOrCreatePlannedJsonChange(task, defaultJson10.path);
 
-                        foreach (var (jsonFile10, node10) in jsonFileCache)
+                        foreach (var (race10, gender10, entry10) in eqdpEntries)
                         {
-                            var manipPaths10 = new List<string>();
-                            FindManipulationsForItem(node10, "<root>", oldTokLow10, oldAltLow10, manipPaths10);
-                            if (manipPaths10.Count == 0) continue;
+                            var sentinel10 = $"{targetLabel10}|{newInt10}|{race10}|{gender10}";
+                            var injJson10  = $"{{\"Type\":\"Eqdp\",\"Manipulation\":{{\"Entry\":{entry10},\"SetId\":{newInt10},\"Slot\":\"{targetLabel10}\",\"Race\":\"{race10}\",\"Gender\":\"{gender10}\"}}}}";
 
-                            var planned10 = task.PlannedJsonChanges
-                                .FirstOrDefault(j => string.Equals(
-                                    j.FilePath, jsonFile10, StringComparison.OrdinalIgnoreCase));
-                            if (planned10 == null)
+                            planned10.Changes.Add(new JsonFieldChange
                             {
-                                planned10 = new PlannedJsonChange { FilePath = jsonFile10, Selected = true };
-                                task.PlannedJsonChanges.Add(planned10);
-                            }
-
-                            foreach (var (race10, gender10, entry10) in eqdpEntries)
-                            {
-                                var sentinel10 = $"{targetLabel10}|{newInt10}|{race10}|{gender10}";
-                                var injJson10  = $"{{\"Type\":\"Eqdp\",\"Manipulation\":{{\"Entry\":{entry10},\"SetId\":{newInt10},\"Slot\":\"{targetLabel10}\",\"Race\":\"{race10}\",\"Gender\":\"{gender10}\"}}}}";
-
-                                foreach (var mp in manipPaths10)
-                                    planned10.Changes.Add(new JsonFieldChange
-                                    {
-                                        JsonPath   = mp,
-                                        OldValue   = sentinel10,
-                                        NewValue   = injJson10,
-                                        ChangeType = "eqdp_insert",
-                                        Selected   = true,
-                                    });
-                            }
-
-                            _log.Debug("[APIC] EQDP injection planned: {0} entries for SetId={1} Slot={2} in {3}",
-                                       eqdpEntries.Count, newInt10, targetLabel10, Path.GetFileName(jsonFile10));
+                                JsonPath   = "<root>.Manipulations",
+                                OldValue   = sentinel10,
+                                NewValue   = injJson10,
+                                ChangeType = "eqdp_insert",
+                                Selected   = true,
+                            });
                         }
+
+                        _log.Debug("[APIC] EQDP injection planned: {0} entries for SetId={1} Slot={2} in {3}",
+                                   eqdpEntries.Count, newInt10, targetLabel10, Path.GetFileName(defaultJson10.path));
                     }
+                }
+            }
+
+            // ── 11. IMC variant-redirect injection ─────────────────────────────────
+            // For each game variant of the new item that has no existing Imc manipulation
+            // in this mod, inject a redirect that sets MaterialId = TargetVariant so that
+            // every game variant loads from the single material-variant folder provided by
+            // this mod.  Variants already covered by an existing Imc manipulation (either
+            // for the old item ID that will be updated, or the new item ID) are skipped to
+            // avoid creating conflicting duplicate entries.
+            // Entries go into default_mod.json's always-on Manipulations array.
+            if (_gameData != null && task.TargetVariant > 0)
+            {
+                var targetSlot11  = task.TargetSlot ?? task.Slot;
+                var slotLabel11   = SlotInfo.LabelMap[targetSlot11];
+                int oldInt11      = int.Parse(padOld.TrimStart('0').PadLeft(1, '0'));
+                int newInt11      = int.Parse(padNew.TrimStart('0').PadLeft(1, '0'));
+                bool isAcc11      = SlotInfo.IsAccessory(targetSlot11);
+                string objType11  = isAcc11 ? "Accessory" : "Equipment";
+                int targetVar11   = task.TargetVariant;
+
+                var imcEntries11 = _gameData.GetImcVariantEntries((ushort)newInt11, targetSlot11);
+                if (imcEntries11.Count > 0 && FindDefaultModJson(jsonFileCache) is { } defaultJson11)
+                {
+                    var planned11 = GetOrCreatePlannedJsonChange(task, defaultJson11.path);
+
+                    int injected11 = 0;
+                    foreach (var e in imcEntries11)
+                    {
+                        // Skip variants already covered by an existing Imc manipulation —
+                        // the old-item one will be updated by PlanJsonChanges and adding
+                        // another entry for the same variant would create a duplicate.
+                        if (HasImcVariantManipulation(jsonFileCache, oldInt11, slotLabel11, e.Variant)) continue;
+                        if (HasImcVariantManipulation(jsonFileCache, newInt11, slotLabel11, e.Variant)) continue;
+
+                        var entryObj = new JsonObject
+                        {
+                            ["MaterialId"]          = targetVar11,
+                            ["DecalId"]             = (int)e.DecalId,
+                            ["AttributeMask"]       = (int)e.AttributeMask,
+                            ["SoundId"]             = (int)e.SoundId,
+                            ["VfxId"]               = (int)e.VfxId,
+                            ["MaterialAnimationId"] = (int)e.MaterialAnimationId,
+                        };
+                        var identObj11 = new JsonObject
+                        {
+                            ["Entry"]       = entryObj,
+                            ["PrimaryId"]   = newInt11,
+                            ["SecondaryId"] = 0,
+                            ["Variant"]     = e.Variant,
+                            ["ObjectType"]  = objType11,
+                            ["EquipSlot"]   = slotLabel11,
+                        };
+                        var manip11 = new JsonObject
+                        {
+                            ["Type"]         = "Imc",
+                            ["Manipulation"] = identObj11,
+                        };
+
+                        var sentinel11 = $"{slotLabel11}|{newInt11}|{e.Variant}";
+                        var injJson11  = manip11.ToJsonString();
+
+                        planned11.Changes.Add(new JsonFieldChange
+                        {
+                            JsonPath   = "<root>.Manipulations",
+                            OldValue   = sentinel11,
+                            NewValue   = injJson11,
+                            ChangeType = "imc_insert",
+                            Selected   = true,
+                        });
+                        injected11++;
+                    }
+
+                    if (injected11 > 0)
+                        _log.Debug("[APIC] IMC redirect injection planned: {0} variant(s) for item {1} slot {2} → material v{3:D4} in {4}",
+                                   injected11, newInt11, slotLabel11, targetVar11, Path.GetFileName(defaultJson11.path));
                 }
             }
 
@@ -632,16 +674,17 @@ public sealed class ModConverterService
             int fileCount = 0;
 
             // ── 1. Copy renamed asset files (applying binary patches + variant normalisation) ─
-            // Sort so the source variant chosen by the user is processed first.
-            // When multiple material variants normalise to the same destination
-            // (e.g. v0001 and v0004 both → v0001 after NormalizeMaterialVariant),
-            // the copy with the correct source variant wins the dedup check.
+            // When SourceVariant > 0, only files from the matching material-variant folder are
+            // copied; other variants are explicitly skipped (no dedup ambiguity).  When
+            // SourceVariant == 0, fall back to sort-and-dedup: the highest variant wins.
             foreach (var rename in task.PlannedRenames
                 .Where(r => r.Selected)
                 .OrderBy(r => MtrlVariantSortKey(r.OldPath, task.SourceVariant)))
             {
                 if (jsonExts.Contains(Path.GetExtension(rename.OldPath))) continue;
                 if (!File.Exists(rename.OldPath)) continue;
+                // Skip material variant folders that don't match the source variant.
+                if (task.SourceVariant > 0 && IsNonMatchingMtrlVariant(rename.OldPath, task.SourceVariant)) continue;
 
                 // Normalise the material-variant folder in the destination path
                 // (e.g. material/v0003/ → material/v0001/ when targetVariant == 1).
@@ -666,6 +709,8 @@ public sealed class ModConverterService
             {
                 if (oldPathSet.Contains(assetPath)) continue;   // already written above
                 if (!File.Exists(assetPath)) continue;
+                // Skip material variant folders that don't match the source variant.
+                if (task.SourceVariant > 0 && IsNonMatchingMtrlVariant(assetPath, task.SourceVariant)) continue;
 
                 var relSrc   = NormalizeMaterialVariant(
                                    Path.GetRelativePath(sourceBase, assetPath),
@@ -685,10 +730,13 @@ public sealed class ModConverterService
 
             // ── 3. Build the set of local paths present in the new mod (NORMALISED) ───
             // Used to filter which Files-dict entries belong in the new mod.
+            // Mirror the same source-variant filter used in steps 1 and 2 so that JSON
+            // entries don't reference material files that were intentionally skipped.
             var includedLocalPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var r in task.PlannedRenames.Where(r => r.Selected))
             {
                 if (jsonExts.Contains(Path.GetExtension(r.OldPath))) continue;
+                if (task.SourceVariant > 0 && IsNonMatchingMtrlVariant(r.OldPath, task.SourceVariant)) continue;
                 includedLocalPaths.Add(
                     NormalizeMaterialVariant(
                         Path.GetRelativePath(sourceBase, r.NewPath).Replace('\\', '/'),
@@ -697,6 +745,7 @@ public sealed class ModConverterService
             foreach (var assetPath in task.AllAssetFiles)
             {
                 if (oldPathSet.Contains(assetPath)) continue;
+                if (task.SourceVariant > 0 && IsNonMatchingMtrlVariant(assetPath, task.SourceVariant)) continue;
                 includedLocalPaths.Add(
                     NormalizeMaterialVariant(
                         Path.GetRelativePath(sourceBase, assetPath).Replace('\\', '/'),
@@ -837,6 +886,10 @@ public sealed class ModConverterService
             // filenames (group_001_…, group_002_…, …) so sequential numbering is
             // maintained even when some source groups are filtered out.
             var pendingGroups = new List<(int origNum, string suffix, JsonObject node)>();
+            // Set to true when at least one IMC group for the source item is carried
+            // over.  When true, step 4b skips the flat variant-redirect injections
+            // because the groups already handle per-variant material routing.
+            bool hasImcGroupForItem = false;
 
             // Enumerate ALL root-level JSON files so that option-group files are never
             // silently skipped when they happen to carry no old-token references of
@@ -863,6 +916,10 @@ public sealed class ModConverterService
                             ApplyJsonChangeAtPath(node, change);
                     }
 
+                    // Retargeted Imc manipulations must reference the variant-normalised
+                    // material folder (material/v{targetVariant:D4}/) of the new mod.
+                    NormalizeImcMaterialVariants(node, oldInt, newInt, slotLabel, targetVariant);
+
                     if (string.Equals(fname, "default_mod.json", StringComparison.OrdinalIgnoreCase))
                     {
                         // Extract flat always-on Files/FileSwaps/Manipulations only
@@ -879,12 +936,15 @@ public sealed class ModConverterService
                         var typ = (node as JsonObject)?["Type"]?.GetValue<string>() ?? string.Empty;
                         JsonObject? filtered;
                         if (string.Equals(typ, "Imc", StringComparison.OrdinalIgnoreCase))
+                        {
                             // Only include IMC groups for the exact source item (oldInt).
                             // Sibling-item IMC groups (e.g. e9068 attribute toggles) are
                             // irrelevant to the converted item and must NOT be carried over.
                             filtered = TransformImcGroupJson(
                                 node as JsonObject, oldInt, newInt,
-                                sourceSlotLabel, slotLabel);
+                                sourceSlotLabel, slotLabel, targetVariant);
+                            if (filtered != null) hasImcGroupForItem = true;
+                        }
                         else
                             filtered = FilterGroupJson(
                                 node, includedLocalPaths, newTokenLow, newInt, slotLabel,
@@ -920,12 +980,16 @@ public sealed class ModConverterService
                 $"preserved {pendingGroups.Count} option group file(s).");
 
             // ── 4b. Inject IMC variant-redirect manipulations ─────────────────────
-            // For every variant of the new item, set MaterialId = targetVariant so the
-            // game always loads material/v{targetVariant:D4}/ regardless of which
-            // in-game variant the player has equipped.
-            if (targetVariant > 0)
+            // When IMC groups for the source item were carried over (now retargeted to
+            // the new item), those groups already handle per-variant material routing —
+            // adding flat default-mod redirects would duplicate or override them.
+            // Only inject the flat redirects when no such IMC groups exist so that every
+            // game variant of the new item reliably loads material/v{targetVariant:D4}/.
+            if (targetVariant > 0 && !hasImcGroupForItem)
                 AddImcVariantRedirects(newInt, targetSlot, targetVariant,
                                        mergedManipulations, seenManipulations, Log);
+            else if (hasImcGroupForItem)
+                Log($"[INFO] IMC groups found for source item; using group-based variant routing instead of default redirects.");
 
             // ── 5. Write default_mod.json ─────────────────────────────────────────
             var defaultMod = new JsonObject
@@ -1280,6 +1344,9 @@ public sealed class ModConverterService
 
             if (change.ChangeType == "eqdp_insert")
                 return ApplyEqdpInsert(root, change);
+
+            if (change.ChangeType == "imc_insert")
+                return ApplyImcInsert(root, change);
 
             var path = change.JsonPath;
             if (!path.StartsWith("<root>")) return false;
@@ -1667,6 +1734,240 @@ public sealed class ModConverterService
         return true;
     }
 
+    // IMC insertion helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Rewrites <c>MaterialId</c> to <paramref name="targetVariant"/> inside every
+    /// Imc manipulation (flat or group-file style) whose PrimaryId matches
+    /// <paramref name="oldInt"/> or <paramref name="newInt"/> and whose slot matches
+    /// <paramref name="slotLabel"/>.  Used when creating a new mod so that retargeted
+    /// manipulations reference the variant-normalised material folder
+    /// (<c>material/v{targetVariant:D4}/</c>) instead of the source item's folder.
+    /// </summary>
+    private static void NormalizeImcMaterialVariants(
+        JsonNode? node, int oldInt, int newInt, string slotLabel, int targetVariant)
+    {
+        if (targetVariant <= 0) return;
+
+        if (node is JsonObject obj)
+        {
+            if (string.Equals(obj["Type"]?.GetValue<string>(), "Imc",
+                              StringComparison.OrdinalIgnoreCase))
+            {
+                // Case 1: flat manipulation inside a Manipulations array
+                //   { "Type":"Imc", "Manipulation":{ "PrimaryId":N, "EquipSlot":"Body",
+                //                                    "Entry":{ "MaterialId":M, ... } } }
+                if (obj["Manipulation"] is JsonObject manip)
+                {
+                    var mSlot = manip["EquipSlot"]?.GetValue<string>()
+                             ?? manip["Slot"]?.GetValue<string>()
+                             ?? string.Empty;
+                    bool slotOk = string.IsNullOrEmpty(mSlot) ||
+                                  string.Equals(mSlot, slotLabel, StringComparison.OrdinalIgnoreCase);
+                    if (slotOk &&
+                        TryGetImcPrimaryId(manip, out var pid) &&
+                        (pid == oldInt || pid == newInt))
+                        SetImcMaterialId(manip["Entry"] as JsonObject, targetVariant);
+                    return; // don't recurse further into this subtree
+                }
+
+                // Case 2: IMC group file root
+                //   { "Type":"Imc", "Identifier":{"PrimaryId":N, "EquipSlot":"Body"},
+                //     "DefaultEntry":{ "MaterialId":M, ... },
+                //     "Options":[ { "Entry":{ "MaterialId":M, ... } } ] }
+                if (obj["Identifier"] is JsonObject ident)
+                {
+                    var mSlot = ident["EquipSlot"]?.GetValue<string>() ?? string.Empty;
+                    bool slotOk = string.IsNullOrEmpty(mSlot) ||
+                                  string.Equals(mSlot, slotLabel, StringComparison.OrdinalIgnoreCase);
+                    if (slotOk &&
+                        TryGetImcPrimaryId(ident, out var pid) &&
+                        (pid == oldInt || pid == newInt))
+                    {
+                        SetImcMaterialId(obj["DefaultEntry"] as JsonObject, targetVariant);
+                        if (obj["Options"] is JsonArray opts)
+                            foreach (var o in opts)
+                                if (o is JsonObject optObj)
+                                    SetImcMaterialId(optObj["Entry"] as JsonObject, targetVariant);
+                    }
+                    return; // handled
+                }
+            }
+
+            // Generic recursion for non-Imc objects
+            foreach (var kv in obj)
+                NormalizeImcMaterialVariants(kv.Value, oldInt, newInt, slotLabel, targetVariant);
+        }
+        else if (node is JsonArray arr)
+        {
+            foreach (var item in arr)
+                NormalizeImcMaterialVariants(item, oldInt, newInt, slotLabel, targetVariant);
+        }
+    }
+
+    /// <summary>Sets <c>MaterialId</c> on an IMC entry object to <paramref name="targetVariant"/>.</summary>
+    private static void SetImcMaterialId(JsonObject? entry, int targetVariant)
+    {
+        if (entry?["MaterialId"] is JsonValue mat &&
+            mat.GetValueKind() == JsonValueKind.Number &&
+            mat.GetValue<int>() != targetVariant)
+            entry["MaterialId"] = targetVariant;
+    }
+
+    private static bool TryGetImcPrimaryId(JsonObject obj, out int id)
+    {
+        var n = obj["PrimaryId"];
+        if (n?.GetValueKind() == JsonValueKind.Number)  { id = n.GetValue<int>(); return true; }
+        if (n?.GetValueKind() == JsonValueKind.String &&
+            int.TryParse(n.GetValue<string>(), out id)) return true;
+        id = -1;
+        return false;
+    }
+
+    /// <summary>
+    /// Navigates to the Manipulations array identified by <paramref name="change"/>.JsonPath,
+    /// checks for a duplicate Imc entry (EquipSlot + PrimaryId + Variant), and appends
+    /// the new element if not already present.
+    /// </summary>
+    private static bool ApplyImcInsert(JsonNode root, JsonFieldChange change)
+    {
+        var arrPath = change.JsonPath;
+        if (!arrPath.StartsWith("<root>")) return false;
+        arrPath = arrPath[6..];
+
+        var segs = ParseJsonPath(arrPath);
+        if (segs.Count == 0) return false;
+
+        JsonNode? curr = root;
+        for (int i = 0; i < segs.Count - 1; i++)
+        {
+            curr = segs[i].Kind switch
+            {
+                PathSegKind.Property => (curr as JsonObject)?[segs[i].Name],
+                PathSegKind.Index    => (curr as JsonArray)?[segs[i].Index],
+                _ => null,
+            };
+            if (curr == null) return false;
+        }
+
+        // Navigate to the terminal array, creating it if absent on a JsonObject parent.
+        var termSeg = segs[^1];
+        if (termSeg.Kind == PathSegKind.Property && curr is JsonObject parentObj)
+        {
+            if (parentObj[termSeg.Name] is not JsonArray)
+            {
+                if (parentObj[termSeg.Name] != null) return false;
+                parentObj[termSeg.Name] = new JsonArray();
+            }
+            curr = parentObj[termSeg.Name];
+        }
+        else
+        {
+            curr = termSeg.Kind switch
+            {
+                PathSegKind.Property => (curr as JsonObject)?[termSeg.Name],
+                PathSegKind.Index    => (curr as JsonArray)?[termSeg.Index],
+                _ => null,
+            };
+        }
+
+        if (curr is not JsonArray manipArr) return false;
+
+        // Duplicate guard: sentinel is "slotLabel|newSetId|variant"
+        var sp = change.OldValue.Split('|');
+        if (sp.Length == 3 &&
+            int.TryParse(sp[1], out var chkSetId) &&
+            int.TryParse(sp[2], out var chkVariant))
+        {
+            var chkSlot = sp[0];
+            foreach (var item in manipArr)
+            {
+                if (item is not JsonObject mobj) continue;
+                if (mobj["Type"]?.GetValue<string>() != "Imc") continue;
+                var mm = mobj["Manipulation"] as JsonObject;
+                if (mm == null) continue;
+
+                var mSlot = mm["EquipSlot"]?.GetValue<string>()
+                         ?? mm["Slot"]?.GetValue<string>()
+                         ?? string.Empty;
+                bool slotOk = string.IsNullOrEmpty(mSlot) ||
+                              string.Equals(mSlot, chkSlot, StringComparison.OrdinalIgnoreCase);
+                if (!slotOk) continue;
+
+                var mId = mm["PrimaryId"];
+                bool idOk = (mId?.GetValueKind() == JsonValueKind.Number && mId.GetValue<int>() == chkSetId) ||
+                            (mId?.GetValueKind() == JsonValueKind.String &&
+                             int.TryParse(mId.GetValue<string>(), out var si) && si == chkSetId);
+                if (!idOk) continue;
+
+                var mVar = mm["Variant"];
+                bool varOk = (mVar?.GetValueKind() == JsonValueKind.Number && mVar.GetValue<int>() == chkVariant) ||
+                             (mVar?.GetValueKind() == JsonValueKind.String &&
+                              int.TryParse(mVar.GetValue<string>(), out var vi) && vi == chkVariant);
+                if (varOk) return false; // already present
+            }
+        }
+
+        var newNode = JsonNode.Parse(change.NewValue);
+        if (newNode == null) return false;
+        manipArr.Add(newNode);
+        return true;
+    }
+
+    /// <summary>Returns true if any JSON file in <paramref name="jsonCache"/> already contains
+    /// an Imc manipulation for <paramref name="setId"/> + <paramref name="slotLabel"/> at the
+    /// specific <paramref name="variant"/>.</summary>
+    private static bool HasImcVariantManipulation(
+        IReadOnlyList<(string path, JsonNode node)> jsonCache,
+        int setId, string slotLabel, int variant)
+    {
+        foreach (var (_, node) in jsonCache)
+            if (WalkForImcVariantManipulation(node, setId, slotLabel, variant))
+                return true;
+        return false;
+    }
+
+    private static bool WalkForImcVariantManipulation(
+        JsonNode? node, int setId, string slotLabel, int variant)
+    {
+        if (node is JsonObject obj)
+        {
+            if (obj["Type"]?.GetValue<string>() == "Imc" &&
+                obj["Manipulation"] is JsonObject manip)
+            {
+                var mSlot = manip["EquipSlot"]?.GetValue<string>()
+                         ?? manip["Slot"]?.GetValue<string>()
+                         ?? string.Empty;
+                bool slotOk = string.IsNullOrEmpty(mSlot) ||
+                              string.Equals(mSlot, slotLabel, StringComparison.OrdinalIgnoreCase);
+                if (slotOk)
+                {
+                    var mId = manip["PrimaryId"];
+                    bool idOk = (mId?.GetValueKind() == JsonValueKind.Number && mId.GetValue<int>() == setId) ||
+                                (mId?.GetValueKind() == JsonValueKind.String &&
+                                 int.TryParse(mId.GetValue<string>(), out var si) && si == setId);
+                    if (idOk)
+                    {
+                        var mVar = manip["Variant"];
+                        bool varOk = (mVar?.GetValueKind() == JsonValueKind.Number && mVar.GetValue<int>() == variant) ||
+                                     (mVar?.GetValueKind() == JsonValueKind.String &&
+                                      int.TryParse(mVar.GetValue<string>(), out var vi) && vi == variant);
+                        if (varOk) return true;
+                    }
+                }
+            }
+            foreach (var kv in obj)
+                if (WalkForImcVariantManipulation(kv.Value, setId, slotLabel, variant)) return true;
+        }
+        else if (node is JsonArray arr)
+        {
+            foreach (var item in arr)
+                if (WalkForImcVariantManipulation(item, setId, slotLabel, variant)) return true;
+        }
+        return false;
+    }
+
     /// <summary>Returns true if any JSON file already contains an Eqdp manipulation
     /// for <paramref name="oldSetId"/> + <paramref name="slotLabel"/> (any race/gender).</summary>
     private static bool HasEqdpManipulation(
@@ -1839,48 +2140,34 @@ public sealed class ModConverterService
     }
 
     /// <summary>
-    /// Recursively finds the JSON paths of every <c>Manipulations</c> array that lives
-    /// inside an option object whose <c>Files</c> or <c>FileSwaps</c> dict references
-    /// either <paramref name="oldTokenLow"/> or <paramref name="oldAltLow"/>.
+    /// Returns the <c>default_mod.json</c> entry from the JSON file cache, or <c>null</c>.
+    /// Used as the target for always-on manipulation injections.
     /// </summary>
-    private static void FindManipulationsForItem(
-        JsonNode? node, string path,
-        string oldTokenLow, string oldAltLow,
-        List<string> manipPaths)
+    private static (string path, JsonNode node)? FindDefaultModJson(
+        IReadOnlyList<(string path, JsonNode node)> jsonCache)
     {
-        if (node is JsonObject obj)
-        {
-            bool hasOldFiles = false;
-            foreach (var filesKey in new[] { "Files", "FileSwaps" })
-            {
-                if (obj[filesKey] is JsonObject filesObj)
-                {
-                    foreach (var kv in filesObj)
-                    {
-                        var kl = kv.Key.ToLower();
-                        var vl = kv.Value?.GetValueKind() == JsonValueKind.String
-                            ? kv.Value.GetValue<string>().ToLower() : string.Empty;
-                        if (kl.Contains(oldTokenLow) || kl.Contains(oldAltLow) ||
-                            vl.Contains(oldTokenLow) || vl.Contains(oldAltLow))
-                        { hasOldFiles = true; break; }
-                    }
-                }
-                if (hasOldFiles) break;
-            }
+        foreach (var (path, node) in jsonCache)
+            if (string.Equals(Path.GetFileName(path), "default_mod.json",
+                              StringComparison.OrdinalIgnoreCase))
+                return (path, node);
+        return null;
+    }
 
-            if (hasOldFiles)
-                manipPaths.Add($"{path}.Manipulations");
-
-            foreach (var kv in obj)
-                FindManipulationsForItem(kv.Value, $"{path}.{kv.Key}",
-                                         oldTokenLow, oldAltLow, manipPaths);
-        }
-        else if (node is JsonArray arr)
+    /// <summary>
+    /// Returns the <see cref="PlannedJsonChange"/> for <paramref name="filePath"/>,
+    /// creating one (selected) if it does not exist yet.
+    /// </summary>
+    private static PlannedJsonChange GetOrCreatePlannedJsonChange(
+        ConversionTask task, string filePath)
+    {
+        var planned = task.PlannedJsonChanges.FirstOrDefault(j => string.Equals(
+            j.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+        if (planned == null)
         {
-            for (int i = 0; i < arr.Count; i++)
-                FindManipulationsForItem(arr[i], $"{path}[{i}]",
-                                         oldTokenLow, oldAltLow, manipPaths);
+            planned = new PlannedJsonChange { FilePath = filePath, Selected = true };
+            task.PlannedJsonChanges.Add(planned);
         }
+        return planned;
     }
 
     // Numeric-metadata leftover helpers
@@ -2663,7 +2950,8 @@ public sealed class ModConverterService
         int             oldInt,
         int             newInt,
         string          sourceSlotLabel,
-        string          targetSlotLabel)
+        string          targetSlotLabel,
+        int             targetVariant = 0)
     {
         if (groupObj == null) return null;
         if (groupObj["Identifier"] is not JsonObject ident) return null;
@@ -2707,6 +2995,21 @@ public sealed class ModConverterService
         if (!string.IsNullOrEmpty(targetSlotLabel) &&
             !string.Equals(sourceSlotLabel, targetSlotLabel, StringComparison.OrdinalIgnoreCase))
             resultIdent["EquipSlot"] = targetSlotLabel;
+
+        // Update MaterialId in DefaultEntry and every option Entry to targetVariant.
+        if (targetVariant > 0)
+        {
+            if (result["DefaultEntry"] is JsonObject defEntry &&
+                defEntry["MaterialId"] != null)
+                defEntry["MaterialId"] = targetVariant;
+
+            if (result["Options"] is JsonArray opts)
+                for (int i = 0; i < opts.Count; i++)
+                    if (opts[i] is JsonObject optObj &&
+                        optObj["Entry"] is JsonObject optEntry &&
+                        optEntry["MaterialId"] != null)
+                        optEntry["MaterialId"] = targetVariant;
+        }
 
         return result;
     }
@@ -2960,20 +3263,22 @@ public sealed class ModConverterService
     }
 
     /// <summary>
-    /// Patches <c>/material/v{N:D4}/</c> byte sequences inside binary file content
+    /// Patches <c>material/v{N:D4}/</c> byte sequences inside binary file content
     /// (primarily <c>.mdl</c> files, which embed ASCII material-path strings) to use
     /// <paramref name="targetVariant"/>.  Variants 1–9 are checked; same-variant
     /// occurrences are skipped.  The replacement is in-place safe because all
     /// variant folder names have the same length (<c>v0001</c> … <c>v0009</c>).
+    /// The paths embedded in .mdl files are relative (e.g. <c>material/v0004/…</c>),
+    /// so the leading slash must not be required.
     /// </summary>
     private static byte[] NormalizeBinaryMaterialVariant(byte[] bytes, int targetVariant)
     {
         if (targetVariant <= 0) return bytes;
-        var target = Encoding.Latin1.GetBytes($"/material/v{targetVariant:D4}/");
+        var target = Encoding.Latin1.GetBytes($"material/v{targetVariant:D4}/");
         for (int v = 1; v <= 9; v++)
         {
             if (v == targetVariant) continue;
-            var search = Encoding.Latin1.GetBytes($"/material/v{v:D4}/");
+            var search = Encoding.Latin1.GetBytes($"material/v{v:D4}/");
             if (search.Length == target.Length)
                 ReplaceBytesInArray(ref bytes, search, target);
         }
@@ -3050,6 +3355,19 @@ public sealed class ModConverterService
         if (!int.TryParse(m.Groups[1].Value, out var v)) return int.MaxValue;
         if (sourceVariant > 0 && v == sourceVariant) return 0; // exact match → first
         return 10_000 - v;                                      // higher variant → earlier
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when <paramref name="path"/> contains a material-variant
+    /// folder segment (e.g. <c>/material/v0003/</c>) whose variant number differs from
+    /// <paramref name="sourceVariant"/>.  Returns <c>false</c> for paths without such
+    /// a segment so that non-material assets (models, textures) are always included.
+    /// </summary>
+    private static bool IsNonMatchingMtrlVariant(string path, int sourceVariant)
+    {
+        var m = Regex.Match(path.Replace('\\', '/').ToLower(), @"/material/v(\d{4})/");
+        if (!m.Success) return false;
+        return int.TryParse(m.Groups[1].Value, out var v) && v != sourceVariant;
     }
 
     /// <summary>Writes a minimal Penumbra <c>meta.json</c> with the given display name.</summary>

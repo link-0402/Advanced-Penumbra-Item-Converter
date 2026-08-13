@@ -7,3 +7,12 @@ H:\FFXIVmods\Advanced Penumbra Item Converter\plugin\AdvancedPenumbraItemConvert
 H:\FFXIVmods\Advanced Penumbra Item Converter\plugin\AdvancedPenumbraItemConverter\obj\Release\AdvancedPenumbraItemConverter.csproj.CoreCompileInputs.cache
 H:\FFXIVmods\Advanced Penumbra Item Converter\plugin\AdvancedPenumbraItemConverter\obj\Release\AdvancedPenumbraItemConverter.sourcelink.json
 H:\FFXIVmods\Advanced Penumbra Item Converter\plugin\AdvancedPenumbraItemConverter\obj\Release\AdvancedPenumbraItemConverter.dll
+H:\FFXIVmods\Advanced Penumbra Item Converter\bin\Release\AdvancedPenumbraItemConverter.deps.json
+H:\FFXIVmods\Advanced Penumbra Item Converter\bin\Release\AdvancedPenumbraItemConverter.dll
+H:\FFXIVmods\Advanced Penumbra Item Converter\obj\Release\AdvancedPenumbraItemConverter.csproj.AssemblyReference.cache
+H:\FFXIVmods\Advanced Penumbra Item Converter\obj\Release\AdvancedPenumbraItemConverter.GeneratedMSBuildEditorConfig.editorconfig
+H:\FFXIVmods\Advanced Penumbra Item Converter\obj\Release\AdvancedPenumbraItemConverter.AssemblyInfoInputs.cache
+H:\FFXIVmods\Advanced Penumbra Item Converter\obj\Release\AdvancedPenumbraItemConverter.AssemblyInfo.cs
+H:\FFXIVmods\Advanced Penumbra Item Converter\obj\Release\AdvancedPenumbraItemConverter.csproj.CoreCompileInputs.cache
+H:\FFXIVmods\Advanced Penumbra Item Converter\obj\Release\AdvancedPenumbraItemConverter.sourcelink.json
+H:\FFXIVmods\Advanced Penumbra Item Converter\obj\Release\AdvancedPenumbraItemConverter.dll

@@ -38,7 +38,28 @@ public static class SlotInfo
 
     public static readonly IReadOnlyDictionary<string, EquipSlot> ReverseMap;
 
+    /// <summary>
+    /// Maps slots to the EquipSlot string values used in Penumbra mod JSON
+    /// (manipulation "Slot"/"EquipSlot" fields).  These must match Penumbra's
+    /// EquipSlot enum spellings exactly, e.g. "Ears", "RFinger", "LFinger".
+    /// </summary>
     public static readonly IReadOnlyDictionary<EquipSlot, string> LabelMap =
+        new Dictionary<EquipSlot, string>
+        {
+            { EquipSlot.Head,      "Head"    },
+            { EquipSlot.Body,      "Body"    },
+            { EquipSlot.Hands,     "Hands"   },
+            { EquipSlot.Legs,      "Legs"    },
+            { EquipSlot.Feet,      "Feet"    },
+            { EquipSlot.Earring,   "Ears"    },
+            { EquipSlot.Neck,      "Neck"    },
+            { EquipSlot.Wrists,    "Wrists"  },
+            { EquipSlot.RingRight, "RFinger" },
+            { EquipSlot.RingLeft,  "LFinger" },
+        };
+
+    /// <summary>Human-readable slot names for UI display.</summary>
+    public static readonly IReadOnlyDictionary<EquipSlot, string> DisplayLabelMap =
         new Dictionary<EquipSlot, string>
         {
             { EquipSlot.Head,      "Head"       },
