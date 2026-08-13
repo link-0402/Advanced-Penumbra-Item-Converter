@@ -1,18 +1,17 @@
-<<<<<<< HEAD
 [
   {
     "Author": "Luci",
     "Name": "Advanced Penumbra Item Converter",
     "InternalName": "AdvancedPenumbraItemConverter",
     "AssemblyVersion": "1.0.0.0",
-    "Description": "Convert Penumbra mod assets from one FFXIV item ID to another. Renames files, updates JSON metadata, and patches binary paths inside .mdl / .mtrl files — all without touching the game files.",
+    "Description": "Convert Penumbra mod assets from one FFXIV item ID to another. Renames files, updates JSON metadata, and patches binary paths inside .mdl / .mtrl files \u2014 all without touching the game files.",
     "Punchline": "Retarget Penumbra mods to a different item ID in-game.",
-    "RepoUrl": "https://github.com/link-0402/AdvancedPenumbraItemConverter",
+    "RepoUrl": "https://github.com/link-0402/Advanced-Penumbra-Item-Converter",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,
-    "DownloadLinkInstall": "https://github.com/link-0402/AdvancedPenumbraItemConverter/releases/latest/download/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/link-0402/AdvancedPenumbraItemConverter/releases/latest/download/latest.zip",
-    "DownloadLinkTesting": "https://github.com/link-0402/AdvancedPenumbraItemConverter/releases/latest/download/latest.zip",
+    "DownloadLinkInstall": "https://github.com/link-0402/Advanced-Penumbra-Item-Converter/releases/latest/download/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/link-0402/Advanced-Penumbra-Item-Converter/releases/latest/download/latest.zip",
+    "DownloadLinkTesting": "https://github.com/link-0402/Advanced-Penumbra-Item-Converter/releases/latest/download/latest.zip",
     "Tags": [
       "penumbra",
       "modding",
@@ -28,32 +27,3 @@
     "LoadPriority": 0
   }
 ]
-=======
-{
-  "Author": "Luci",
-  "Name": "Advanced Penumbra Item Converter",
-  "InternalName": "AdvancedPenumbraItemConverter",
-  "AssemblyVersion": "1.0.0.0",
-  "Description": "Convert Penumbra mod assets from one FFXIV item ID to another. Renames files, updates JSON metadata, and patches binary paths inside .mdl / .mtrl files — all without touching the game files.",
-  "Punchline": "Retarget Penumbra mods to a different item ID in-game.",
-  "RepoUrl": "https://github.com/link-0402/AdvancedPenumbraItemConverter",
-  "ApplicableVersion": "any",
-  "DalamudApiLevel": 14,
-  "DownloadLinkInstall": "https://github.com/link-0402/AdvancedPenumbraItemConverter/releases/latest/download/latest.zip",
-  "DownloadLinkUpdate": "https://github.com/link-0402/AdvancedPenumbraItemConverter/releases/latest/download/latest.zip",
-  "DownloadLinkTesting": "https://github.com/link-0402/AdvancedPenumbraItemConverter/releases/latest/download/latest.zip",
-  "Tags": [
-    "penumbra",
-    "modding",
-    "ffxiv",
-    "gear"
-  ],
-  "CategoryTags": [
-    "Modding"
-  ],
-  "LoadRequiredState": 0,
-  "LoadSync": false,
-  "CanUnloadAsync": true,
-  "LoadPriority": 0
-}
->>>>>>> 1ceb9cd633b37163c6b5cc72b2d9b6f26a0cae1a
